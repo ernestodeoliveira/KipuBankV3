@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.26;
+
+import "forge-std/Test.sol";
+import "../src/KipuBankV3.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+/**
+ * @title KipuBankV3IntegrationTest
+ * @notice Integration tests usando FEEDS REAIS da Chainlink na Sepolia
+ * @dev Requer fork da Sepolia: anvil --fork-url $SEPOLIA_RPC_URL
+ */
+contract KipuBankV3IntegrationTest is Test {
+    KipuBankV3 public bank;
+    
+    // ✅ ENDEREÇOS OFICIAIS SEPOLIA
+    address constant CHAINLINK_ETH_USD = 0x694AA1769357215DE4FAC081bf1f309aDC325306;
+    address constant CHAINLINK_USDC_USD = 0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E;
+    address constant CHAINLINK_DAI_USD = 0x14866185B1962B63C3Ea9E03Bc1da838bab34C19;
+    address constant CHAINLINK_BTC_USD = 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43;
+    
+    address constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+    address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    address constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
+    address constant DAI = 0x7AF17A48a6336F7dc1beF9D485139f7B6f4FB5C8; // Exemplo
+    
+    address public admin = address(1);
+    address public user1 = address(2);
+    
+    uint256 constant BANK_CAP_USD = 1_000_000e6;
+    uint256 constant WITHDRAWAL_LIMIT_USD = 10_000e6;
+
+    function setUp() public {
+        // Deploy com FEEDS REAIS
+        vm.prank(admin);
+        bank = new KipuBankV3(
+            BANK_CAP_USD,
+            WITHDRAWAL_LIMIT_USD,
+            CHAINLINK_ETH_USD,  // ✅ Feed real ETH/USD
+            POOL_MANAGER,
+            PERMIT2,
+            USDC
+        );
+        
+        // Adicionar DAI com feed real
+        vm.prank(admin);
+        bank.addToken(DAI, CHAINLINK_DAI_USD);  // ✅ Feed real DAI/USD
+        
+        vm.deal(user1, 100 ether);
+    }
+
+    function testRealEthUsdPrice() public view {
+        // Pegar preço REAL via convertToUsd
+        uint256 usdValue = bank.convertToUsd(bank.NATIVE_ETH(), 1 ether);
+        
+        console.log("1 ETH = ", usdValue / 1e6, "USD");
+        
+        // Validar que está razoável (entre $500 e $10,000)
+        assertGt(usdValue, 500e6, "ETH price too low");
+        assertLt(usdValue, 10_000e6, "ETH price too high");
+    }
+
+    function testDepositWithRealPrices() public {
+        uint256 depositAmount = 1 ether;
+        
+        vm.prank(user1);
+        (bool success,) = address(bank).call{value: depositAmount}("");
+        assertTrue(success, "Deposit failed");
+        
+        // Balance USD deve refletir preço real
+        uint256 balanceUsd = bank.getUserBalanceUsd(user1, bank.NATIVE_ETH());
+        console.log("Balance USD (real price):", balanceUsd);
+        
+        assertGt(balanceUsd, 0, "Should have USD balance");
+    }
+
+    function testConvertEthToUsd() public view {
+        uint256 ethAmount = 1 ether;
+        uint256 usdValue = bank.convertToUsd(bank.NATIVE_ETH(), ethAmount);
+        
+        console.log("1 ETH =", usdValue / 1e6, "USD");
+        
+        assertGt(usdValue, 0, "Should convert to USD");
+    }
+}
